@@ -1,0 +1,13 @@
+{
+  "name": "NYISH — Nguumo Young Investors Self Help Group",
+  "short_name": "NYISH",
+  "description": "Member registration, savings, loans, meetings and constitution for NYISH.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101F1B",
+  "theme_color": "#16302A",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
