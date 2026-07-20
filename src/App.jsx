@@ -37,10 +37,10 @@ function useFonts() {
 
 const GROUP_NAME = "Nguumo Young Investors Self Help Group";
 const GROUP_SHORT = "NYISH";
-const BOOTSTRAP_PHONE = "0700000000";
+const BOOTSTRAP_PHONE = "0712345678";
 // 8+ chars, upper + lower + a special character — meets the same rule every
 // member's password must meet (see isValidPassword below).
-const BOOTSTRAP_PASSWORD = "Admin@2024";
+const BOOTSTRAP_PASSWORD = "Admin@2026";
 
 // Common bank/paybill account that all member M-PESA STK Push contributions
 // settle into (see the Safaricom Daraja integration in SavingsPage / the
