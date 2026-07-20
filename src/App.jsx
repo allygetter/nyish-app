@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, functionsUrl, supabaseAnonKey } from "./lib/storage.js"; // sets up window.storage backed by Supabase, exports auth client
+import { functionsUrl, supabaseAnonKey } from "./lib/storage.js"; // sets up window.storage backed by Supabase
 import {
   Home, Users, PiggyBank, HandCoins, CalendarDays, Megaphone, FileText,
   Award, LogIn, UserPlus, Check, X, ChevronRight, ChevronLeft, Plus,
   Download, ShieldCheck, Wallet, Clock, LogOut, Menu, Loader2, AlertCircle,
-  CheckCircle2, XCircle, Landmark, Mail, KeyRound, Smartphone, RefreshCw
+  CheckCircle2, XCircle, Landmark, KeyRound, Smartphone
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -470,18 +470,9 @@ function LoginScreen({ members, onLogin, goRegister, notify }) {
 }
 
 function RegisterScreen({ members, onRegistered, goLogin, notify }) {
-  const [step, setStep] = useState("form"); // "form" | "code"
   const [form, setForm] = useState({ name: "", phone: "", idNumber: "", email: "", password: "" });
-  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  useEffect(() => {
-    if (resendCooldown <= 0) return;
-    const t = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
-    return () => clearTimeout(t);
-  }, [resendCooldown]);
 
   const validateForm = () => {
     if (members.some((m) => m.phone === form.phone.trim())) {
@@ -489,7 +480,7 @@ function RegisterScreen({ members, onRegistered, goLogin, notify }) {
       return false;
     }
     if (!isValidEmail(form.email)) {
-      notify("Enter a valid email address — we'll send a verification code to it.");
+      notify("Enter a valid email address.");
       return false;
     }
     if (members.some((m) => (m.email || "").toLowerCase() === form.email.trim().toLowerCase())) {
@@ -503,50 +494,35 @@ function RegisterScreen({ members, onRegistered, goLogin, notify }) {
     return true;
   };
 
-  const sendCode = async () => {
-    if (!supabase) {
-      // No Supabase auth configured — fall back to skipping verification rather
-      // than hard-blocking registration, but tell the person clearly.
-      notify("Email verification isn't configured on this server; continuing without it.");
-      return true;
+  // Fire-and-mostly-forget: emails the new member a welcome/thank-you note
+  // and alerts officials that someone new needs approval. Handled by a
+  // Supabase Edge Function (supabase/functions/notify-registration) since
+  // sending real email requires a server-side API key. Never blocks
+  // registration — if email sending isn't configured or fails, the member
+  // record is still saved and the person still gets in.
+  const sendRegistrationEmails = async (newMember, allMembers) => {
+    if (!functionsUrl("notify-registration")) return;
+    const officialEmails = allMembers
+      .filter((m) => ["chair", "treasurer", "secretary"].includes(m.role) && m.status === "active" && isValidEmail(m.email))
+      .map((m) => m.email.trim());
+    try {
+      await fetch(functionsUrl("notify-registration"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${supabaseAnonKey}` },
+        body: JSON.stringify({
+          member: { name: newMember.name, email: newMember.email, phone: newMember.phone },
+          officialEmails,
+        }),
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("notify-registration failed", err);
     }
-    const { error } = await supabase.auth.signInWithOtp({
-      email: form.email.trim(),
-      options: { shouldCreateUser: true },
-    });
-    if (error) {
-      notify("Could not send the verification code: " + error.message);
-      return false;
-    }
-    return true;
   };
 
-  const submitForm = async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
-    setBusy(true);
-    const ok = await sendCode();
-    setBusy(false);
-    if (!ok) return;
-    if (!supabase) {
-      // Skip straight to account creation when email OTP isn't available.
-      await createMember();
-      return;
-    }
-    setResendCooldown(30);
-    setStep("code");
-    notify(`We sent a 6-digit code to ${form.email.trim()}.`);
-  };
-
-  const resend = async () => {
-    if (resendCooldown > 0) return;
-    setBusy(true);
-    const ok = await sendCode();
-    setBusy(false);
-    if (ok) { setResendCooldown(30); notify("Code resent."); }
-  };
-
-  const createMember = async () => {
     setBusy(true);
     const isFirstEver = members.length === 0;
     const newMember = {
@@ -555,7 +531,6 @@ function RegisterScreen({ members, onRegistered, goLogin, notify }) {
       phone: form.phone.trim(),
       idNumber: form.idNumber.trim(),
       email: form.email.trim(),
-      emailVerified: !supabase ? false : true,
       password: form.password,
       role: isFirstEver ? "chair" : "member",
       status: isFirstEver ? "active" : "pending",
@@ -563,63 +538,22 @@ function RegisterScreen({ members, onRegistered, goLogin, notify }) {
     };
     const updated = [...members, newMember];
     const ok = await saveList("members", updated);
-    setBusy(false);
     if (!ok) {
+      setBusy(false);
       notify("Could not save your registration — check your connection (and Supabase setup) and try again.");
       return;
     }
+    await sendRegistrationEmails(newMember, updated);
+    setBusy(false);
     onRegistered(updated, newMember);
   };
-
-  const verifyCode = async (e) => {
-    e.preventDefault();
-    if (code.trim().length < 6) { notify("Enter the 6-digit code from your email."); return; }
-    setBusy(true);
-    const { error } = await supabase.auth.verifyOtp({
-      email: form.email.trim(),
-      token: code.trim(),
-      type: "email",
-    });
-    setBusy(false);
-    if (error) { notify("That code didn't match: " + error.message); return; }
-    await createMember();
-  };
-
-  if (step === "code") {
-    return (
-      <Card style={{ background: "#FFFDF8" }}>
-        <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 600, color: "#3D3929", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-          <Mail size={18} color="#C99A2E" /> Verify your email
-        </div>
-        <div style={{ fontSize: 12.5, color: "#6B6350", marginBottom: 14 }}>
-          Enter the 6-digit code we sent to <b>{form.email.trim()}</b>.
-        </div>
-        <form onSubmit={verifyCode}>
-          <Field label="Verification code">
-            <input style={{ ...inputStyle, letterSpacing: 4, fontSize: 18, textAlign: "center" }} inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} placeholder="••••••" required />
-          </Field>
-          <Btn type="submit" full variant="gold" icon={<KeyRound size={16} />} disabled={busy}>
-            {busy ? "Verifying…" : "Verify & finish registration"}
-          </Btn>
-        </form>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14, fontSize: 12.5 }}>
-          <button onClick={() => setStep("form")} style={{ background: "none", border: "none", color: "#5B5138", cursor: "pointer", padding: 0 }}>
-            ← Back
-          </button>
-          <button onClick={resend} disabled={resendCooldown > 0 || busy} style={{ background: "none", border: "none", color: resendCooldown > 0 ? "#A79B78" : "#8B4A2B", fontWeight: 700, cursor: resendCooldown > 0 ? "default" : "pointer", padding: 0, display: "flex", alignItems: "center", gap: 4 }}>
-            <RefreshCw size={13} /> {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
-          </button>
-        </div>
-      </Card>
-    );
-  }
 
   return (
     <Card style={{ background: "#FFFDF8" }}>
       <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 600, color: "#3D3929", marginBottom: 14 }}>
         New member registration
       </div>
-      <form onSubmit={submitForm}>
+      <form onSubmit={submit}>
         <Field label="Full name">
           <input style={inputStyle} value={form.name} onChange={set("name")} required />
         </Field>
@@ -637,7 +571,7 @@ function RegisterScreen({ members, onRegistered, goLogin, notify }) {
         </Field>
         <div style={{ fontSize: 11, color: "#A79B78", marginTop: -6, marginBottom: 14 }}>{PASSWORD_RULE_TEXT}</div>
         <Btn type="submit" full variant="gold" icon={<UserPlus size={16} />} disabled={busy}>
-          {busy ? "Submitting…" : "Send verification code"}
+          {busy ? "Submitting…" : "Submit registration"}
         </Btn>
       </form>
       <div style={{ textAlign: "center", marginTop: 14, fontSize: 13, color: "#5B5138" }}>
