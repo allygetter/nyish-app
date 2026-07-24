@@ -474,6 +474,10 @@ function LoginScreen({ onLogin, goRegister, notify }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  // Shown when auth succeeds but the member row is missing — lets user
+  // complete the interrupted registration without starting over.
+  const [orphanSession, setOrphanSession] = useState(null);
+  const [repairForm, setRepairForm] = useState({ name: "", phone: "", idNumber: "" });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -481,17 +485,85 @@ function LoginScreen({ onLogin, goRegister, notify }) {
     try {
       const { session } = await signIn(email.trim(), password.trim());
       if (!session) { notify("Sign in failed — check your email and password."); setBusy(false); return; }
-      // Load member profile from DB using the auth user id
+
       const members = await fetchMembers();
       const me = members.find((m) => m.id === session.user.id);
-      if (!me) { notify("Account exists but no member profile found. Contact an official."); setBusy(false); return; }
-      if (me.status === "pending") { notify("Your registration is awaiting official approval."); setBusy(false); return; }
+
+      if (!me) {
+        // Auth account exists but the member profile row is missing.
+        // This happens when registration was interrupted after signUp but
+        // before insertMember completed (e.g. email confirmation was on).
+        // Let the user complete their profile here instead of a dead-end.
+        setOrphanSession(session);
+        setBusy(false);
+        return;
+      }
+
+      if (me.status === "pending") {
+        notify("Your registration is awaiting Chairperson approval.");
+        setBusy(false);
+        return;
+      }
+
       onLogin(me);
     } catch (err) {
       notify(err.message || "Sign in failed.");
     }
     setBusy(false);
   };
+
+  const completeProfile = async (e) => {
+    e.preventDefault();
+    if (!repairForm.name.trim()) { notify("Full name is required."); return; }
+    setBusy(true);
+    try {
+      const existingMembers = await fetchMembers();
+      const isFirst = existingMembers.filter((m) => m.status === "active").length === 0;
+      await upsertMember({
+        id: orphanSession.user.id,
+        name: repairForm.name.trim(),
+        phone: repairForm.phone.trim(),
+        idNumber: repairForm.idNumber.trim(),
+        email: orphanSession.user.email,
+        role: isFirst ? "chair" : "member",
+        status: isFirst ? "active" : "pending",
+        joinDate: todayISO(),
+      });
+      setOrphanSession(null);
+      notify(isFirst ? "Profile created! Sign in to continue." : "Profile created! Await Chairperson approval.");
+    } catch (err) {
+      console.error("Profile repair error:", err);
+      notify(err.message || "Could not create profile — check your Supabase settings.");
+    }
+    setBusy(false);
+  };
+
+  // Incomplete registration recovery form
+  if (orphanSession) {
+    return (
+      <Card style={{ background: "#FFFDF8" }}>
+        <div style={{ fontFamily: "Fraunces, serif", fontSize: 17, fontWeight: 600, color: "#6B3A28", marginBottom: 8 }}>
+          Complete your profile
+        </div>
+        <div style={{ fontSize: 12.5, color: "#5B5138", marginBottom: 14, lineHeight: 1.5 }}>
+          Your account ({orphanSession.user.email}) exists but your member profile wasn't saved — this can happen if registration was interrupted. Fill in your details to finish.
+        </div>
+        <form onSubmit={completeProfile}>
+          <Field label="Full name">
+            <input style={inputStyle} value={repairForm.name} onChange={(e) => setRepairForm((f) => ({ ...f, name: e.target.value }))} required />
+          </Field>
+          <Field label="Phone number">
+            <input style={inputStyle} value={repairForm.phone} onChange={(e) => setRepairForm((f) => ({ ...f, phone: e.target.value }))} placeholder="07XXXXXXXX" />
+          </Field>
+          <Field label="National ID number">
+            <input style={inputStyle} value={repairForm.idNumber} onChange={(e) => setRepairForm((f) => ({ ...f, idNumber: e.target.value }))} />
+          </Field>
+          <Btn type="submit" full variant="gold" disabled={busy}>{busy ? "Saving…" : "Complete registration"}</Btn>
+        </form>
+        <button onClick={() => setOrphanSession(null)} style={{ background: "none", border: "none", color: "#8B8264", fontSize: 12.5, cursor: "pointer", marginTop: 12, padding: 0 }}>← Back to sign in</button>
+      </Card>
+    );
+  }
 
   return (
     <Card style={{ background: "#FFFDF8" }}>
@@ -549,13 +621,26 @@ function RegisterScreen({ goLogin, notify }) {
     setBusy(true);
     try {
       // OTP_BYPASS_START — remove this block and uncomment OTP_STEP below when enabling OTP.
-      await signUp(form.email.trim(), form.password.trim());
-      // Sign in immediately — bypasses email confirmation requirement.
+
+      // Step 1: create the Supabase Auth account.
+      // If the account already exists (e.g. user retried after a DB failure),
+      // signUp returns the existing user without error — that's fine.
+      const { session: signUpSession, user: signUpUser } = await signUp(form.email.trim(), form.password.trim());
+
+      // Step 2: sign in immediately to get a confirmed session.
+      // NOTE: This requires "Confirm email" to be DISABLED in Supabase →
+      // Authentication → Settings → "Enable email confirmations" toggle OFF.
+      // If that toggle is ON, signIn will return a session but user.confirmed_at
+      // will be null and subsequent DB calls may fail with RLS errors.
       const { session } = await signIn(form.email.trim(), form.password.trim());
-      if (!session?.user) throw new Error("Account created but sign-in failed. Try logging in manually.");
-      const members = await fetchMembers();
-      const isFirst = members.filter((m) => m.status === "active").length === 0;
-      await insertMember({
+      if (!session?.user) throw new Error("Sign-in after registration failed — check your Supabase Auth settings (email confirmation may need to be disabled).");
+
+      // Step 3: create (or repair) the member profile row.
+      // Uses upsertMember so a retry after a previous partial failure
+      // doesn't throw a duplicate-key error.
+      const existingMembers = await fetchMembers();
+      const isFirst = existingMembers.filter((m) => m.status === "active").length === 0;
+      await upsertMember({
         id: session.user.id,
         name: form.name.trim(),
         phone: form.phone.trim(),
@@ -567,8 +652,7 @@ function RegisterScreen({ goLogin, notify }) {
         status: isFirst ? "active" : "pending",
         joinDate: todayISO(),
       });
-      notify(isFirst ? "Registered as Chairperson — you can sign in now." : "Registered! Await Chairperson approval, then sign in.");
-      goLogin();
+
       // OTP_BYPASS_END
 
       // OTP_STEP_START — uncomment this block when you enable OTP verification.
@@ -577,8 +661,15 @@ function RegisterScreen({ goLogin, notify }) {
       // notify("Check your email for a 6-digit verification code.");
       // OTP_STEP_END
 
+      notify(isFirst
+        ? "Registered as Chairperson! Sign in to continue."
+        : "Registered! The Chairperson will approve your account — sign in once approved.");
+      goLogin();
     } catch (err) {
-      notify(err.message || "Registration failed.");
+      // Surface the real error so it's debuggable
+      const msg = err?.message || "Registration failed.";
+      console.error("Registration error:", err);
+      notify(msg);
     }
     setBusy(false);
   };
