@@ -5,7 +5,7 @@ import {
   Download, ShieldCheck, Wallet, LogOut, Menu, Loader2, AlertCircle,
   CheckCircle2, Landmark, User, RefreshCw, Eye, EyeOff, ImagePlus, Wifi, WifiOff, QrCode
 } from "lucide-react";
-import { signIn, signUp, verifySignupCode, resendSignupCode, signOut, getSession, onAuthChange } from "./lib/auth.js";
+import { signIn, signUp, signOut, getSession, onAuthChange } from "./lib/auth.js";
 import { supabase } from "./lib/supabaseClient.js";
 import {
   fetchMembers, insertMember, updateMember, deleteMember, upsertMember,
@@ -519,12 +519,16 @@ function LoginScreen({ onLogin, goRegister, notify }) {
   );
 }
 
-// Three-step registration: fill form → Supabase sends OTP to email → enter code → done.
+// OTP verification is currently BYPASSED.
+// Registration signs up then immediately signs in so members get a live
+// session without email verification.
+//
+// TO RESTORE OTP LATER: search for OTP_STEP_START / OTP_STEP_END below
+// and uncomment those blocks, then re-add verifySignupCode + resendSignupCode
+// to the import from "./lib/auth.js".
 function RegisterScreen({ goLogin, notify }) {
-  const [step, setStep] = useState("form"); // form | verify
   const [form, setForm] = useState({ name: "", phone: "", idNumber: "", kraPin: "", email: "", password: "" });
   const [photo, setPhoto] = useState(null);
-  const [otp, setOtp] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -544,67 +548,11 @@ function RegisterScreen({ goLogin, notify }) {
     if (!PASSWORD_RULE.test(form.password.trim())) { notify("Password doesn't meet the requirements — " + PASSWORD_HINT); return; }
     setBusy(true);
     try {
-      // ---------------------------------------------------------------
-      // TEMP — OTP EMAIL VERIFICATION BYPASSED. TODO: re-enable before
-      // this goes anywhere near real members.
-      //
-      // Normal flow (still intact below, just not called right now):
-      //   signUp() -> setStep("verify") -> user enters the 6-digit code
-      //   -> submitOtp() calls verifySignupCode() -> insertMember() using
-      //   the confirmed session's user id.
-      //
-      // Bypass flow (active now): signUp() returns `user` immediately
-      // (Supabase still creates the auth user even if the email isn't
-      // confirmed yet), so we use `user.id` straight away and skip the
-      // "verify" step / submitOtp entirely.
-      //
-      // To restore OTP later: delete this block, uncomment the two lines
-      // marked below, and delete the bypass block that follows them.
-      //   await signUp(form.email.trim(), form.password.trim());
-      //   setStep("verify");
-      //
-      // NOTE: this only works end-to-end if Supabase Dashboard ->
-      // Authentication -> Providers -> Email -> "Confirm email" is turned
-      // OFF. If it's ON, signUp() still succeeds here, but the member's
-      // later signIn() will fail with "Email not confirmed" until they
-      // click a confirmation link Supabase still auto-sends — so either
-      // turn that setting off too, or expect that failure during testing.
-      // ---------------------------------------------------------------
-      const { user } = await signUp(form.email.trim(), form.password.trim());
-      if (!user) throw new Error("Sign up failed — try again.");
-      const members = await fetchMembers();
-      const isFirst = members.filter((m) => m.status === "active").length === 0;
-      await insertMember({
-        id: user.id,
-        name: form.name.trim(),
-        phone: form.phone.trim(),
-        idNumber: form.idNumber.trim(),
-        kraPin: form.kraPin.trim(),
-        email: form.email.trim(),
-        photo: photo || null,
-        role: isFirst ? "chair" : "member",
-        status: isFirst ? "active" : "pending",
-        joinDate: todayISO(),
-      });
-      notify(isFirst ? "Registered as Chairperson — you can sign in now." : "Registered! Await Chairperson approval, then sign in.");
-      goLogin();
-    } catch (err) {
-      notify(err.message || "Registration failed.");
-    }
-    setBusy(false);
-  };
-
-  // NOTE: submitOtp is currently unreachable — submitForm above bypasses
-  // the "verify" step entirely. Left in place so re-enabling OTP is just
-  // a matter of restoring the two lines noted in the TODO comment above.
-  const submitOtp = async (e) => {
-    e.preventDefault();
-    if (!otp.trim()) { notify("Enter the code from your email."); return; }
-    setBusy(true);
-    try {
-      const { session } = await verifySignupCode(form.email.trim(), otp.trim());
-      if (!session?.user) throw new Error("Verification failed — try again.");
-      // Create the member profile in the DB using the auth user's UUID as the id
+      // OTP_BYPASS_START — remove this block and uncomment OTP_STEP below when enabling OTP.
+      await signUp(form.email.trim(), form.password.trim());
+      // Sign in immediately — bypasses email confirmation requirement.
+      const { session } = await signIn(form.email.trim(), form.password.trim());
+      if (!session?.user) throw new Error("Account created but sign-in failed. Try logging in manually.");
       const members = await fetchMembers();
       const isFirst = members.filter((m) => m.status === "active").length === 0;
       await insertMember({
@@ -620,39 +568,75 @@ function RegisterScreen({ goLogin, notify }) {
         joinDate: todayISO(),
       });
       notify(isFirst ? "Registered as Chairperson — you can sign in now." : "Registered! Await Chairperson approval, then sign in.");
-      setStep("form");
       goLogin();
+      // OTP_BYPASS_END
+
+      // OTP_STEP_START — uncomment this block when you enable OTP verification.
+      // await signUp(form.email.trim(), form.password.trim());
+      // setStep("verify");
+      // notify("Check your email for a 6-digit verification code.");
+      // OTP_STEP_END
+
     } catch (err) {
-      notify(err.message || "Verification failed.");
+      notify(err.message || "Registration failed.");
     }
     setBusy(false);
   };
 
-  if (step === "verify") {
-    // NOTE: currently unreachable while the OTP bypass in submitForm is
-    // active (step never gets set to "verify"). Kept intact for when
-    // OTP verification is turned back on.
-    return (
-      <Card style={{ background: "#FFFDF8" }}>
-        <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 600, color: "#6B3A28", marginBottom: 10 }}>
-          Verify your email
-        </div>
-        <div style={{ fontSize: 12.5, color: "#5B5138", marginBottom: 14 }}>
-          A 6-digit code was sent to <b>{form.email}</b>. Check your inbox (and spam folder).
-        </div>
-        <form onSubmit={submitOtp}>
-          <Field label="Verification code">
-            <input style={{ ...inputStyle, letterSpacing: 6, fontSize: 20, textAlign: "center" }} value={otp} onChange={(e) => setOtp(e.target.value)} inputMode="numeric" maxLength={6} required />
-          </Field>
-          <Btn type="submit" full variant="gold" disabled={busy}>{busy ? "Verifying…" : "Verify & complete"}</Btn>
-        </form>
-        <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between" }}>
-          <button onClick={() => setStep("form")} style={{ background: "none", border: "none", color: "#8B8264", fontSize: 12.5, cursor: "pointer", padding: 0 }}>← Back</button>
-          <button onClick={async () => { try { await resendSignupCode(form.email.trim()); notify("New code sent."); } catch (e) { notify(e.message); } }} style={{ background: "none", border: "none", color: "#8B4A2B", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: 0 }}>Resend code</button>
-        </div>
-      </Card>
-    );
-  }
+  // OTP_STEP_START — uncomment this full block when enabling OTP.
+  // const [step, setStep] = useState("form"); // form | verify
+  // const [otp, setOtp] = useState("");
+  //
+  // const submitOtp = async (e) => {
+  //   e.preventDefault();
+  //   if (!otp.trim()) { notify("Enter the code from your email."); return; }
+  //   setBusy(true);
+  //   try {
+  //     const { session } = await verifySignupCode(form.email.trim(), otp.trim());
+  //     if (!session?.user) throw new Error("Verification failed — try again.");
+  //     const members = await fetchMembers();
+  //     const isFirst = members.filter((m) => m.status === "active").length === 0;
+  //     await insertMember({
+  //       id: session.user.id,
+  //       name: form.name.trim(), phone: form.phone.trim(),
+  //       idNumber: form.idNumber.trim(), kraPin: form.kraPin.trim(),
+  //       email: form.email.trim(), photo: photo || null,
+  //       role: isFirst ? "chair" : "member",
+  //       status: isFirst ? "active" : "pending",
+  //       joinDate: todayISO(),
+  //     });
+  //     notify(isFirst ? "Registered as Chairperson — you can sign in now." : "Registered! Await Chairperson approval, then sign in.");
+  //     setStep("form");
+  //     goLogin();
+  //   } catch (err) {
+  //     notify(err.message || "Verification failed.");
+  //   }
+  //   setBusy(false);
+  // };
+  //
+  // if (step === "verify") {
+  //   return (
+  //     <Card style={{ background: "#FFFDF8" }}>
+  //       <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 600, color: "#6B3A28", marginBottom: 10 }}>
+  //         Verify your email
+  //       </div>
+  //       <div style={{ fontSize: 12.5, color: "#5B5138", marginBottom: 14 }}>
+  //         A 6-digit code was sent to <b>{form.email}</b>. Check your inbox (and spam folder).
+  //       </div>
+  //       <form onSubmit={submitOtp}>
+  //         <Field label="Verification code">
+  //           <input style={{ ...inputStyle, letterSpacing: 6, fontSize: 20, textAlign: "center" }} value={otp} onChange={(e) => setOtp(e.target.value)} inputMode="numeric" maxLength={6} required />
+  //         </Field>
+  //         <Btn type="submit" full variant="gold" disabled={busy}>{busy ? "Verifying…" : "Verify & complete"}</Btn>
+  //       </form>
+  //       <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between" }}>
+  //         <button onClick={() => setStep("form")} style={{ background: "none", border: "none", color: "#8B8264", fontSize: 12.5, cursor: "pointer", padding: 0 }}>← Back</button>
+  //         <button onClick={async () => { try { await resendSignupCode(form.email.trim()); notify("New code sent."); } catch (e) { notify(e.message); } }} style={{ background: "none", border: "none", color: "#8B4A2B", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: 0 }}>Resend code</button>
+  //       </div>
+  //     </Card>
+  //   );
+  // }
+  // OTP_STEP_END
 
   return (
     <Card style={{ background: "#FFFDF8" }}>
@@ -674,7 +658,7 @@ function RegisterScreen({ goLogin, notify }) {
         </Field>
         <Field label="Email">
           <input style={inputStyle} type="email" value={form.email} onChange={set("email")} required />
-          <div style={{ fontSize: 11, color: "#A79B78", marginTop: 4 }}>We'll send a verification code here, then notify you of approval.</div>
+          <div style={{ fontSize: 11, color: "#A79B78", marginTop: 4 }}>You will be notified here when your registration is approved.</div>
         </Field>
         <Field label="Passport photo (optional)">
           <input style={{ ...inputStyle, fontSize: 12 }} type="file" accept="image/*" onChange={onPhotoChange} />
@@ -685,7 +669,7 @@ function RegisterScreen({ goLogin, notify }) {
           <div style={{ fontSize: 11, color: "#A79B78", marginTop: 4 }}>{PASSWORD_HINT}</div>
         </Field>
         <Btn type="submit" full variant="gold" icon={<UserPlus size={16} />} disabled={busy}>
-          {busy ? "Creating account…" : "Create account & verify email"}
+          {busy ? "Registering…" : "Register"}
         </Btn>
       </form>
       <div style={{ textAlign: "center", marginTop: 14, fontSize: 13, color: "#5B5138" }}>
