@@ -1,287 +1,146 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { supabase, getMemberProfile } from '../lib/supabase.js'
+import React, { useState, useRef } from 'react'
+import { supabase, getMemberProfile, uploadPhoto } from '../lib/supabase.js'
 import { COLORS, FONTS } from '../lib/styles.js'
-import { Mail, Lock, User, Phone, CreditCard, FileText, Camera, Eye, EyeOff, Shield, WifiOff, AlertCircle } from 'lucide-react'
+import {
+  Mail, Lock, User, Phone, CreditCard, FileText, Camera,
+  Eye, EyeOff, Shield, AlertCircle
+} from 'lucide-react'
 
-export default function LoginScreen({ navigateTo, setProfile }) {
-  const [mode, setMode] = useState('login')
+export default function LoginScreen({ navigateTo, setProfile, setUser }) {
+  const [mode, setMode] = useState('login') // login | register | onboarding
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [registeredUser, setRegisteredUser] = useState(null)
-  const [connectionStatus, setConnectionStatus] = useState('checking') // checking | ok | fail
 
-  const [reg, setReg] = useState({ name: '', phone: '', id_number: '', kra_pin: '', photo: null })
+  const [reg, setReg] = useState({
+    name: '', phone: '', id_number: '', kra_pin: '',
+    photo: null, next_of_kin: '', next_of_kin_phone: ''
+  })
   const [photoPreview, setPhotoPreview] = useState(null)
   const fileRef = useRef()
-  const otpRefs = useRef([])
 
-  // ─── DIAGNOSTIC: Test Supabase connection on mount ───
-  useEffect(() => {
-    async function testConnection() {
-      try {
-        const { data, error } = await supabase.auth.getSession()
-        console.log('[DIAG] getSession:', { data, error })
-        if (error) {
-          console.error('[DIAG] Connection failed:', error)
-          setConnectionStatus('fail')
-          setError('Cannot connect to Supabase. Check your .env file has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
-        } else {
-          console.log('[DIAG] Supabase connection OK')
-          setConnectionStatus('ok')
-        }
-      } catch (e) {
-        console.error('[DIAG] Exception:', e)
-        setConnectionStatus('fail')
-        setError('Supabase client failed to initialize. Check console (F12) for details.')
-      }
-    }
-    testConnection()
-  }, [])
-
-  function extractErrorMessage(err) {
-    if (!err) return 'Unknown error (null)'
-    if (typeof err === 'string') return err
-    if (err.message && typeof err.message === 'string') return err.message
-    if (err.error_description && typeof err.error_description === 'string') return err.error_description
-    if (err.error && typeof err.error === 'string') return err.error
-    if (err.code && typeof err.code === 'string') return `Error code: ${err.code}`
-    if (err.status && typeof err.status === 'number') return `HTTP ${err.status}`
-    try { return JSON.stringify(err) } catch { return 'Unknown error (cannot stringify)' }
+  // ─── HELPERS ───
+  function showError(msg) {
+    setError(msg)
+    console.error('[NYISH]', msg)
   }
 
+  // ─── LOGIN ───
   async function handleLogin(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
-    try {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-      console.log('[LOGIN] signInWithPassword response:', { data, error: signInError })
 
-      if (signInError) {
-        setError(extractErrorMessage(signInError))
-        setLoading(false)
-        return
-      }
-      if (!data?.user) {
-        setError('Sign in returned no user. Check Supabase Auth > Users in your dashboard.')
-        setLoading(false)
-        return
-      }
+    const { data, error: qErr } = await supabase
+      .from('members')
+      .select('*')
+      .eq('email', email)
+      .eq('password', password)
+      .single()
 
-      let profile = await getMemberProfile(data.user.id)
-      console.log('[LOGIN] profile lookup:', profile)
-
-      if (!profile) {
-        console.log('[LOGIN] No profile found, attempting self-repair insert...')
-        const { error: insertErr } = await supabase.from('members').insert({
-          id: data.user.id,
-          name: data.user.user_metadata?.name || email.split('@')[0],
-          phone: data.user.user_metadata?.phone || '',
-          id_number: data.user.user_metadata?.id_number || '',
-          kra_pin: data.user.user_metadata?.kra_pin || '',
-          email: data.user.email,
-          role: 'member',
-          status: 'pending',
-        })
-        if (insertErr) {
-          setError('Login OK but profile missing. Did you run supabase-schema.sql? Error: ' + extractErrorMessage(insertErr))
-          setLoading(false)
-          return
-        }
-        profile = await getMemberProfile(data.user.id)
-      }
-
-      setProfile(profile)
-      if (profile?.onboarding_completed) {
-        navigateTo('dashboard', true)
-      } else {
-        setRegisteredUser(data.user)
-        setMode('onboarding')
-      }
-    } catch (e) {
-      console.error('[LOGIN] Exception:', e)
-      setError('Login crashed: ' + extractErrorMessage(e))
+    if (qErr || !data) {
+      showError(qErr?.message || 'Invalid email or password.')
+      setLoading(false)
+      return
     }
+
+    localStorage.setItem('nyish_user_id', data.id)
+    setUser({ id: data.id, email: data.email })
+    setProfile(data)
+    navigateTo('dashboard', true)
     setLoading(false)
   }
 
+  // ─── REGISTER ───
   async function handleRegister(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
 
-    console.log('[REGISTER] Attempting signUp with:', { email, name: reg.name })
-
-    try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            name: reg.name,
-            phone: reg.phone,
-            id_number: reg.id_number,
-            kra_pin: reg.kra_pin,
-          }
-        }
-      })
-
-      console.log('[REGISTER] Raw signUp response:', { data, error: signUpError })
-
-      // ─── CASE 1: Hard error from Supabase ───
-      if (signUpError) {
-        const msg = extractErrorMessage(signUpError)
-        console.error('[REGISTER] signUp error:', msg, signUpError)
-        setError('Registration failed: ' + msg)
-        setLoading(false)
-        return
-      }
-
-      // ─── CASE 2: No data at all ───
-      if (!data) {
-        setError('Supabase returned nothing. Check your VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env')
-        setLoading(false)
-        return
-      }
-
-      const user = data.user
-      const session = data.session
-
-      console.log('[REGISTER] user:', user, 'session:', session ? 'present' : 'null')
-
-      // ─── CASE 3: No user returned ───
-      if (!user) {
-        setError('No user returned. This usually means: (1) Email already registered, (2) Weak password (min 6 chars), or (3) Supabase Auth > Email provider is disabled.')
-        setLoading(false)
-        return
-      }
-
-      // ─── CASE 4: User created but no session = email confirmation required ───
-      if (!session) {
-        console.log('[REGISTER] Email confirmation required. User ID:', user.id)
-        setRegisteredUser(user)
-        setMode('otp')
-        setLoading(false)
-        return
-      }
-
-      // ─── CASE 5: Dev mode — user + session both present ───
-      console.log('[REGISTER] Dev mode — no confirmation required')
-      setRegisteredUser(user)
-
-      // Self-repair: ensure members row exists
-      let profile = await getMemberProfile(user.id)
-      if (!profile) {
-        console.log('[REGISTER] No profile row, self-repairing...')
-        const { error: insertErr } = await supabase.from('members').insert({
-          id: user.id,
-          name: reg.name,
-          phone: reg.phone,
-          id_number: reg.id_number,
-          kra_pin: reg.kra_pin,
-          email: user.email,
-          role: 'member',
-          status: 'pending',
-        })
-        if (insertErr) {
-          console.error('[REGISTER] Self-repair failed:', insertErr)
-        }
-        profile = await getMemberProfile(user.id)
-      }
-      setMode('onboarding')
-
-    } catch (e) {
-      console.error('[REGISTER] Exception:', e)
-      setError('Registration crashed: ' + extractErrorMessage(e))
-    }
-    setLoading(false)
-  }
-
-  async function handleOtpSubmit() {
-    const code = otp.join('')
-    if (code.length !== 6) {
-      setError('Please enter all 6 digits')
+    if (password.length < 4) {
+      showError('Password must be at least 4 characters.')
+      setLoading(false)
       return
     }
-    setLoading(true)
-    setError('')
-    try {
-      const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        email,
-        token: code,
-        type: 'signup'
-      })
-      console.log('[OTP] verifyOtp response:', { data, error: verifyError })
 
-      if (verifyError) {
-        setError(extractErrorMessage(verifyError))
-        setLoading(false)
-        return
-      }
-      if (data?.user) {
-        setRegisteredUser(data.user)
-        setMode('onboarding')
-      } else {
-        setError('Verification OK but no user returned.')
-      }
-    } catch (e) {
-      console.error('[OTP] Exception:', e)
-      setError(extractErrorMessage(e))
+    // Check if this is the first member ever
+    const { count, error: countErr } = await supabase
+      .from('members')
+      .select('*', { count: 'exact', head: true })
+
+    if (countErr) {
+      showError('Could not check existing members: ' + countErr.message)
+      setLoading(false)
+      return
     }
+
+    const isFirst = count === 0
+    const userId = crypto.randomUUID()
+
+    const { error: insertErr } = await supabase.from('members').insert({
+      id: userId,
+      name: reg.name,
+      phone: reg.phone,
+      id_number: reg.id_number,
+      kra_pin: reg.kra_pin,
+      email: email,
+      password: password,
+      role: isFirst ? 'chair' : 'member',
+      status: isFirst ? 'active' : 'pending',
+      onboarding_completed: false,
+    })
+
+    if (insertErr) {
+      showError('Registration failed: ' + insertErr.message)
+      setLoading(false)
+      return
+    }
+
+    const profile = await getMemberProfile(userId)
+    setRegisteredUser(profile)
+    setMode('onboarding')
     setLoading(false)
   }
 
+  // ─── ONBOARDING ───
   async function handleOnboardingSubmit(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
-    try {
-      let photoUrl = null
-      if (reg.photo) {
-        const { uploadPhoto } = await import('../lib/supabase.js')
-        try {
-          photoUrl = await uploadPhoto(reg.photo, registeredUser.id)
-        } catch (e) {
-          console.error('Photo upload failed', e)
-        }
+
+    let photoUrl = null
+    if (reg.photo) {
+      try {
+        photoUrl = await uploadPhoto(reg.photo, registeredUser.id)
+      } catch (e) {
+        console.error('Photo upload failed', e)
       }
-
-      console.log('[ONBOARD] Upserting member row for:', registeredUser.id)
-
-      const { error: updError } = await supabase
-        .from('members')
-        .upsert({
-          id: registeredUser.id,
-          name: reg.name,
-          phone: reg.phone,
-          id_number: reg.id_number,
-          kra_pin: reg.kra_pin,
-          email: registeredUser.email,
-          photo: photoUrl,
-          onboarding_completed: true,
-          next_of_kin: reg.next_of_kin || null,
-          next_of_kin_phone: reg.next_of_kin_phone || null,
-          role: 'member',
-          status: 'pending',
-        }, { onConflict: 'id' })
-
-      if (updError) {
-        setError('Failed to save profile: ' + extractErrorMessage(updError))
-        setLoading(false)
-        return
-      }
-
-      const profile = await getMemberProfile(registeredUser.id)
-      setProfile(profile)
-      navigateTo('dashboard', true)
-    } catch (e) {
-      console.error('[ONBOARD] Exception:', e)
-      setError(extractErrorMessage(e))
     }
+
+    const { error: updErr } = await supabase
+      .from('members')
+      .update({
+        next_of_kin: reg.next_of_kin || null,
+        next_of_kin_phone: reg.next_of_kin_phone || null,
+        photo: photoUrl,
+        onboarding_completed: true,
+      })
+      .eq('id', registeredUser.id)
+
+    if (updErr) {
+      showError('Failed to save profile: ' + updErr.message)
+      setLoading(false)
+      return
+    }
+
+    const profile = await getMemberProfile(registeredUser.id)
+    localStorage.setItem('nyish_user_id', profile.id)
+    setUser({ id: profile.id, email: profile.email })
+    setProfile(profile)
+    navigateTo('dashboard', true)
     setLoading(false)
   }
 
@@ -310,35 +169,17 @@ export default function LoginScreen({ navigateTo, setProfile }) {
     reader.readAsDataURL(file)
   }
 
-  function handleOtpChange(i, val) {
-    if (!/^\d?$/.test(val)) return
-    const next = [...otp]
-    next[i] = val
-    setOtp(next)
-    if (val && i < 5) otpRefs.current[i + 1]?.focus()
-  }
+  // ─── RENDER: ERROR BOX ───
+  const ErrorBox = () => error ? (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
+      <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
+      <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
+    </div>
+  ) : null
 
-  function handleOtpKey(i, e) {
-    if (e.key === 'Backspace' && !otp[i] && i > 0) {
-      otpRefs.current[i - 1]?.focus()
-    }
-  }
-
-  // ─── RENDER: Connection warning banner ───
-  const ConnectionBanner = () => {
-    if (connectionStatus === 'checking') return null
-    if (connectionStatus === 'fail') return (
-      <div style={{ background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 12, padding: 12, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <WifiOff size={20} color="#991B1B" />
-        <div>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#991B1B' }}>Cannot reach Supabase</p>
-          <p style={{ fontSize: 12, color: '#B91C1C' }}>Check .env file and browser console (F12)</p>
-        </div>
-      </div>
-    )
-    return null
-  }
-
+  // ═══════════════════════════════════════════════════════
+  // LOGIN SCREEN
+  // ═══════════════════════════════════════════════════════
   if (mode === 'login') {
     return (
       <div style={loginContainer}>
@@ -346,30 +187,34 @@ export default function LoginScreen({ navigateTo, setProfile }) {
           <Shield size={40} color={COLORS.gold} />
         </div>
         <h1 style={{ fontFamily: FONTS.display, fontSize: 28, color: COLORS.brown, marginBottom: 4 }}>NYISH</h1>
-        <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 24 }}>Your community savings group</p>
-
-        <ConnectionBanner />
+        <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 32 }}>Your community savings group</p>
 
         <form onSubmit={handleLogin} style={{ width: '100%', maxWidth: 320 }}>
           <div style={inputGroup}>
             <Mail size={18} color={COLORS.textMuted} />
-            <input type="email" placeholder="Email address" required value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} />
+            <input
+              type="email" placeholder="Email address" required
+              value={email} onChange={e => setEmail(e.target.value)}
+              style={inputStyle}
+            />
           </div>
           <div style={inputGroup}>
             <Lock size={18} color={COLORS.textMuted} />
-            <input type={showPassword ? 'text' : 'password'} placeholder="Password" required value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
+            <input
+              type={showPassword ? 'text' : 'password'} placeholder="Password" required
+              value={password} onChange={e => setPassword(e.target.value)}
+              style={inputStyle}
+            />
             <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
               {showPassword ? <EyeOff size={18} color={COLORS.textMuted} /> : <Eye size={18} color={COLORS.textMuted} />}
             </button>
           </div>
-          {error && (
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
-              <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
-              <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
-            </div>
-          )}
-          <button type="submit" disabled={loading} style={primaryBtn}>{loading ? 'Signing in...' : 'Sign In'}</button>
+          <ErrorBox />
+          <button type="submit" disabled={loading} style={primaryBtn}>
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
         </form>
+
         <button onClick={() => { setMode('register'); setError('') }} style={linkBtn}>
           New member? <span style={{ color: COLORS.gold, fontWeight: 600 }}>Register</span>
         </button>
@@ -377,13 +222,13 @@ export default function LoginScreen({ navigateTo, setProfile }) {
     )
   }
 
+  // ═══════════════════════════════════════════════════════
+  // REGISTER SCREEN
+  // ═══════════════════════════════════════════════════════
   if (mode === 'register') {
     return (
       <div style={loginContainer}>
-        <h2 style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.brown, marginBottom: 20 }}>Join NYISH</h2>
-
-        <ConnectionBanner />
-
+        <h2 style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.brown, marginBottom: 24 }}>Join NYISH</h2>
         <form onSubmit={handleRegister} style={{ width: '100%', maxWidth: 320 }}>
           <div style={inputGroup}>
             <User size={18} color={COLORS.textMuted} />
@@ -407,64 +252,50 @@ export default function LoginScreen({ navigateTo, setProfile }) {
           </div>
           <div style={inputGroup}>
             <Lock size={18} color={COLORS.textMuted} />
-            <input type="password" placeholder="Create password (min 6 chars)" required value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
+            <input type="password" placeholder="Create password (min 4 chars)" required value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
           </div>
-          {error && (
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
-              <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
-              <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
-            </div>
-          )}
-          <button type="submit" disabled={loading} style={primaryBtn}>{loading ? 'Registering...' : 'Create Account'}</button>
+          <ErrorBox />
+          <button type="submit" disabled={loading} style={primaryBtn}>
+            {loading ? 'Registering...' : 'Create Account'}
+          </button>
         </form>
         <button onClick={() => setMode('login')} style={linkBtn}>Already have an account? Sign in</button>
       </div>
     )
   }
 
-  if (mode === 'otp') {
-    return (
-      <div style={loginContainer}>
-        <h2 style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.brown, marginBottom: 8 }}>Verify Email</h2>
-        <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 8, textAlign: 'center' }}>
-          Enter the 6-digit code sent to<br /><strong>{email}</strong>
-        </p>
-        <p style={{ color: COLORS.textMuted, fontSize: 12, marginBottom: 20, textAlign: 'center' }}>
-          If you don't see the email, check Supabase Auth settings<br />or your spam folder.
-        </p>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-          {otp.map((d, i) => (
-            <input key={i} ref={el => otpRefs.current[i] = el} value={d} onChange={e => handleOtpChange(i, e.target.value)} onKeyDown={e => handleOtpKey(i, e)} maxLength={1}
-              style={{ width: 44, height: 52, textAlign: 'center', fontSize: 20, fontWeight: 700, border: `2px solid ${d ? COLORS.gold : COLORS.border}`, borderRadius: 10, background: '#fff', color: COLORS.brown, outline: 'none' }} />
-          ))}
-        </div>
-        {error && (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
-            <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
-            <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
-          </div>
-        )}
-        <button onClick={handleOtpSubmit} disabled={loading || otp.join('').length !== 6} style={primaryBtn}>{loading ? 'Verifying...' : 'Verify'}</button>
-        <button onClick={() => setMode('register')} style={linkBtn}>Back to registration</button>
-      </div>
-    )
-  }
-
+  // ═══════════════════════════════════════════════════════
+  // ONBOARDING SCREEN
+  // ═══════════════════════════════════════════════════════
   if (mode === 'onboarding') {
+    const isChair = registeredUser?.role === 'chair'
     return (
       <div style={loginContainer}>
-        <h2 style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.brown, marginBottom: 8 }}>Complete Profile</h2>
+        <h2 style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.brown, marginBottom: 8 }}>
+          {isChair ? 'Welcome, Chairperson!' : 'Complete Profile'}
+        </h2>
         <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 24, textAlign: 'center' }}>
-          Your registration is pending Chairperson approval.
+          {isChair
+            ? 'You are the first member — you have been assigned as Chairperson.'
+            : 'Your registration is pending Chairperson approval.'}
         </p>
         <form onSubmit={handleOnboardingSubmit} style={{ width: '100%', maxWidth: 320 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20 }}>
-            <div onClick={() => fileRef.current?.click()} style={{ width: 100, height: 100, borderRadius: '50%', border: `2px dashed ${COLORS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', background: COLORS.creamDark }}>
-              {photoPreview ? <img src={photoPreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Camera size={28} color={COLORS.textMuted} />}
+            <div onClick={() => fileRef.current?.click()} style={{
+              width: 100, height: 100, borderRadius: '50%', border: `2px dashed ${COLORS.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              overflow: 'hidden', cursor: 'pointer', background: COLORS.creamDark
+            }}>
+              {photoPreview ? (
+                <img src={photoPreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <Camera size={28} color={COLORS.textMuted} />
+              )}
             </div>
             <input ref={fileRef} type="file" accept="image/*" onChange={handlePhotoChange} style={{ display: 'none' }} />
             <span style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 8 }}>Tap to add photo (optional)</span>
           </div>
+
           <div style={inputGroup}>
             <User size={18} color={COLORS.textMuted} />
             <input placeholder="Next of Kin name" value={reg.next_of_kin || ''} onChange={e => setReg(r => ({ ...r, next_of_kin: e.target.value }))} style={inputStyle} />
@@ -473,13 +304,11 @@ export default function LoginScreen({ navigateTo, setProfile }) {
             <Phone size={18} color={COLORS.textMuted} />
             <input placeholder="Next of Kin phone" value={reg.next_of_kin_phone || ''} onChange={e => setReg(r => ({ ...r, next_of_kin_phone: e.target.value }))} style={inputStyle} />
           </div>
-          {error && (
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
-              <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
-              <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
-            </div>
-          )}
-          <button type="submit" disabled={loading} style={primaryBtn}>{loading ? 'Saving...' : 'Complete Registration'}</button>
+
+          <ErrorBox />
+          <button type="submit" disabled={loading} style={primaryBtn}>
+            {loading ? 'Saving...' : isChair ? 'Enter Dashboard' : 'Complete Registration'}
+          </button>
         </form>
       </div>
     )
@@ -492,15 +321,26 @@ const loginContainer = {
   background: COLORS.cream
 }
 const sealStyle = {
-  width: 80, height: 80, borderRadius: '50%', border: `3px solid ${COLORS.gold}`,
-  display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, background: '#fff'
+  width: 80, height: 80, borderRadius: '50%',
+  border: `3px solid ${COLORS.gold}`,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  marginBottom: 16, background: '#fff'
 }
 const inputGroup = {
-  display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${COLORS.border}`,
+  display: 'flex', alignItems: 'center', gap: 10,
+  background: '#fff', border: `1px solid ${COLORS.border}`,
   borderRadius: 12, padding: '10px 14px', marginBottom: 12
 }
 const inputStyle = {
-  flex: 1, border: 'none', outline: 'none', fontSize: 15, color: COLORS.brown, background: 'transparent'
+  flex: 1, border: 'none', outline: 'none', fontSize: 15,
+  color: COLORS.brown, background: 'transparent'
 }
 const primaryBtn = {
-  width: '100%', padding: '14px', borderRadius: 12, border:
+  width: '100%', padding: '14px', borderRadius: 12, border: 'none',
+  background: COLORS.brown, color: '#fff', fontSize: 15, fontWeight: 600,
+  cursor: 'pointer', marginTop: 8
+}
+const linkBtn = {
+  background: 'none', border: 'none', color: COLORS.textLight,
+  fontSize: 14, marginTop: 20, cursor: 'pointer'
+}
