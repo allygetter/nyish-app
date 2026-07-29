@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { supabase, getCurrentUser, getMemberProfile } from './lib/supabase.js'
+import { supabase, getMemberProfile } from './lib/supabase.js'
 import { setupOnlineListener, flushQueue, isOnline } from './lib/offlineQueue.js'
 import { COLORS, FONTS } from './lib/styles.js'
 import {
-  Home, Users, PiggyBank, Landmark, Calendar, Megaphone, ShieldAlert,
-  User, Settings, ChevronLeft, WifiOff, Wifi, Menu, X, LogOut, Crown
+  Home, Users, PiggyBank, Landmark, Calendar, Menu, ChevronLeft,
+  WifiOff, User
 } from 'lucide-react'
 
 import LoginScreen from './screens/Login.jsx'
@@ -36,21 +36,13 @@ const SCREENS = {
 }
 
 const TAB_SCREENS = ['dashboard', 'savings', 'loans', 'meetings', 'more']
-
 const TAB_ICONS = {
-  dashboard: Home,
-  savings: PiggyBank,
-  loans: Landmark,
-  meetings: Calendar,
-  more: Menu,
+  dashboard: Home, savings: PiggyBank, loans: Landmark,
+  meetings: Calendar, more: Menu,
 }
-
 const TAB_LABELS = {
-  dashboard: 'Home',
-  savings: 'Savings',
-  loans: 'Loans',
-  meetings: 'Meetings',
-  more: 'More',
+  dashboard: 'Home', savings: 'Savings', loans: 'Loans',
+  meetings: 'Meetings', more: 'More',
 }
 
 export default function App() {
@@ -62,41 +54,24 @@ export default function App() {
   const [online, setOnline] = useState(isOnline())
   const [queueCount, setQueueCount] = useState(0)
 
-  // Auth & profile init
   useEffect(() => {
     let mounted = true
     async function init() {
-      const u = await getCurrentUser()
-      if (!mounted) return
-      if (u) {
-        setUser(u)
-        const p = await getMemberProfile(u.id)
-        setProfile(p)
-        if (p && p.onboarding_completed) {
+      const storedId = localStorage.getItem('nyish_user_id')
+      if (storedId) {
+        const p = await getMemberProfile(storedId)
+        if (!mounted) return
+        if (p) {
+          setUser({ id: storedId, email: p.email })
+          setProfile(p)
           navigateTo('dashboard', true)
-        } else if (p) {
-          navigateTo('login', true) // login handles onboarding flow
+        } else {
+          localStorage.removeItem('nyish_user_id')
         }
       }
       setLoading(false)
     }
     init()
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return
-      if (event === 'SIGNED_IN' && session?.user) {
-        setUser(session.user)
-        const p = await getMemberProfile(session.user.id)
-        setProfile(p)
-        if (p && p.onboarding_completed) {
-          navigateTo('dashboard', true)
-        }
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null)
-        setProfile(null)
-        navigateTo('login', true)
-      }
-    })
 
     setupOnlineListener(supabase)
     const onOnline = () => { setOnline(true); flushQueue(supabase) }
@@ -108,7 +83,6 @@ export default function App() {
 
     return () => {
       mounted = false
-      listener?.subscription?.unsubscribe()
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
       window.removeEventListener('nyish:queueChanged', onQueue)
@@ -141,7 +115,10 @@ export default function App() {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut()
+    localStorage.removeItem('nyish_user_id')
+    setUser(null)
+    setProfile(null)
+    navigateTo('login', true)
   }
 
   const ScreenComponent = SCREENS[screen] || DashboardScreen
@@ -173,7 +150,6 @@ export default function App() {
       background: COLORS.cream, maxWidth: 480, margin: '0 auto',
       position: 'relative', boxShadow: '0 0 40px rgba(0,0,0,0.08)'
     }}>
-      {/* Top Bar */}
       {user && profile && screen !== 'login' && (
         <header style={{
           height: 56, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -215,7 +191,6 @@ export default function App() {
         </header>
       )}
 
-      {/* Screen Content */}
       <main style={{
         flex: 1, overflowY: 'auto', overflowX: 'hidden',
         WebkitOverflowScrolling: 'touch', position: 'relative'
@@ -224,13 +199,14 @@ export default function App() {
           user={user}
           profile={profile}
           setProfile={setProfile}
+          setUser={setUser}
           navigateTo={navigateTo}
           goBack={goBack}
           isOfficial={isOfficial}
+          handleLogout={handleLogout}
         />
       </main>
 
-      {/* Bottom Nav */}
       {showNav && (
         <nav style={{
           height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-around',
