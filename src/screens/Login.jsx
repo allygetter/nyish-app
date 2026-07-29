@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { supabase, getMemberProfile } from '../lib/supabase.js'
 import { COLORS, FONTS } from '../lib/styles.js'
-import { Mail, Lock, User, Phone, CreditCard, FileText, Camera, Eye, EyeOff, Shield } from 'lucide-react'
+import { Mail, Lock, User, Phone, CreditCard, FileText, Camera, Eye, EyeOff, Shield, WifiOff, AlertCircle } from 'lucide-react'
 
 export default function LoginScreen({ navigateTo, setProfile }) {
   const [mode, setMode] = useState('login')
@@ -12,19 +12,45 @@ export default function LoginScreen({ navigateTo, setProfile }) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [registeredUser, setRegisteredUser] = useState(null)
+  const [connectionStatus, setConnectionStatus] = useState('checking') // checking | ok | fail
 
   const [reg, setReg] = useState({ name: '', phone: '', id_number: '', kra_pin: '', photo: null })
   const [photoPreview, setPhotoPreview] = useState(null)
   const fileRef = useRef()
   const otpRefs = useRef([])
 
+  // ─── DIAGNOSTIC: Test Supabase connection on mount ───
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        console.log('[DIAG] getSession:', { data, error })
+        if (error) {
+          console.error('[DIAG] Connection failed:', error)
+          setConnectionStatus('fail')
+          setError('Cannot connect to Supabase. Check your .env file has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+        } else {
+          console.log('[DIAG] Supabase connection OK')
+          setConnectionStatus('ok')
+        }
+      } catch (e) {
+        console.error('[DIAG] Exception:', e)
+        setConnectionStatus('fail')
+        setError('Supabase client failed to initialize. Check console (F12) for details.')
+      }
+    }
+    testConnection()
+  }, [])
+
   function extractErrorMessage(err) {
-    if (!err) return 'An unknown error occurred'
+    if (!err) return 'Unknown error (null)'
     if (typeof err === 'string') return err
     if (err.message && typeof err.message === 'string') return err.message
     if (err.error_description && typeof err.error_description === 'string') return err.error_description
     if (err.error && typeof err.error === 'string') return err.error
-    try { return JSON.stringify(err) } catch { return 'An unknown error occurred' }
+    if (err.code && typeof err.code === 'string') return `Error code: ${err.code}`
+    if (err.status && typeof err.status === 'number') return `HTTP ${err.status}`
+    try { return JSON.stringify(err) } catch { return 'Unknown error (cannot stringify)' }
   }
 
   async function handleLogin(e) {
@@ -33,18 +59,24 @@ export default function LoginScreen({ navigateTo, setProfile }) {
     setLoading(true)
     try {
       const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+      console.log('[LOGIN] signInWithPassword response:', { data, error: signInError })
+
       if (signInError) {
         setError(extractErrorMessage(signInError))
         setLoading(false)
         return
       }
       if (!data?.user) {
-        setError('Sign in succeeded but no user was returned.')
+        setError('Sign in returned no user. Check Supabase Auth > Users in your dashboard.')
         setLoading(false)
         return
       }
+
       let profile = await getMemberProfile(data.user.id)
+      console.log('[LOGIN] profile lookup:', profile)
+
       if (!profile) {
+        console.log('[LOGIN] No profile found, attempting self-repair insert...')
         const { error: insertErr } = await supabase.from('members').insert({
           id: data.user.id,
           name: data.user.user_metadata?.name || email.split('@')[0],
@@ -56,22 +88,23 @@ export default function LoginScreen({ navigateTo, setProfile }) {
           status: 'pending',
         })
         if (insertErr) {
-          setError('Login succeeded but profile creation failed: ' + extractErrorMessage(insertErr))
+          setError('Login OK but profile missing. Did you run supabase-schema.sql? Error: ' + extractErrorMessage(insertErr))
           setLoading(false)
           return
         }
         profile = await getMemberProfile(data.user.id)
       }
+
       setProfile(profile)
-      if (profile && profile.onboarding_completed) {
+      if (profile?.onboarding_completed) {
         navigateTo('dashboard', true)
       } else {
         setRegisteredUser(data.user)
         setMode('onboarding')
       }
     } catch (e) {
-      console.error('Login exception:', e)
-      setError(extractErrorMessage(e))
+      console.error('[LOGIN] Exception:', e)
+      setError('Login crashed: ' + extractErrorMessage(e))
     }
     setLoading(false)
   }
@@ -80,6 +113,9 @@ export default function LoginScreen({ navigateTo, setProfile }) {
     e.preventDefault()
     setError('')
     setLoading(true)
+
+    console.log('[REGISTER] Attempting signUp with:', { email, name: reg.name })
+
     try {
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -94,25 +130,20 @@ export default function LoginScreen({ navigateTo, setProfile }) {
         }
       })
 
-      console.log('signUp response:', { data, error: signUpError })
+      console.log('[REGISTER] Raw signUp response:', { data, error: signUpError })
 
+      // ─── CASE 1: Hard error from Supabase ───
       if (signUpError) {
-        const msg = extractErrorMessage(signUpError).toLowerCase()
-        if (msg.includes('confirmation') || msg.includes('verify') || msg.includes('email not confirmed') || msg.includes('already registered')) {
-          if (data?.user) {
-            setRegisteredUser(data.user)
-            setMode('otp')
-            setLoading(false)
-            return
-          }
-        }
-        setError(extractErrorMessage(signUpError))
+        const msg = extractErrorMessage(signUpError)
+        console.error('[REGISTER] signUp error:', msg, signUpError)
+        setError('Registration failed: ' + msg)
         setLoading(false)
         return
       }
 
+      // ─── CASE 2: No data at all ───
       if (!data) {
-        setError('Registration returned no data. Check your Supabase configuration.')
+        setError('Supabase returned nothing. Check your VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env')
         setLoading(false)
         return
       }
@@ -120,23 +151,32 @@ export default function LoginScreen({ navigateTo, setProfile }) {
       const user = data.user
       const session = data.session
 
+      console.log('[REGISTER] user:', user, 'session:', session ? 'present' : 'null')
+
+      // ─── CASE 3: No user returned ───
       if (!user) {
-        setError('Registration succeeded but no user was returned.')
+        setError('No user returned. This usually means: (1) Email already registered, (2) Weak password (min 6 chars), or (3) Supabase Auth > Email provider is disabled.')
         setLoading(false)
         return
       }
 
+      // ─── CASE 4: User created but no session = email confirmation required ───
       if (!session) {
+        console.log('[REGISTER] Email confirmation required. User ID:', user.id)
         setRegisteredUser(user)
         setMode('otp')
         setLoading(false)
         return
       }
 
+      // ─── CASE 5: Dev mode — user + session both present ───
+      console.log('[REGISTER] Dev mode — no confirmation required')
       setRegisteredUser(user)
 
+      // Self-repair: ensure members row exists
       let profile = await getMemberProfile(user.id)
       if (!profile) {
+        console.log('[REGISTER] No profile row, self-repairing...')
         const { error: insertErr } = await supabase.from('members').insert({
           id: user.id,
           name: reg.name,
@@ -148,14 +188,15 @@ export default function LoginScreen({ navigateTo, setProfile }) {
           status: 'pending',
         })
         if (insertErr) {
-          console.error('Self-repair insert failed:', insertErr)
+          console.error('[REGISTER] Self-repair failed:', insertErr)
         }
         profile = await getMemberProfile(user.id)
       }
       setMode('onboarding')
+
     } catch (e) {
-      console.error('Register exception:', e)
-      setError(extractErrorMessage(e))
+      console.error('[REGISTER] Exception:', e)
+      setError('Registration crashed: ' + extractErrorMessage(e))
     }
     setLoading(false)
   }
@@ -174,6 +215,8 @@ export default function LoginScreen({ navigateTo, setProfile }) {
         token: code,
         type: 'signup'
       })
+      console.log('[OTP] verifyOtp response:', { data, error: verifyError })
+
       if (verifyError) {
         setError(extractErrorMessage(verifyError))
         setLoading(false)
@@ -183,10 +226,10 @@ export default function LoginScreen({ navigateTo, setProfile }) {
         setRegisteredUser(data.user)
         setMode('onboarding')
       } else {
-        setError('Verification succeeded but no user was returned.')
+        setError('Verification OK but no user returned.')
       }
     } catch (e) {
-      console.error('OTP exception:', e)
+      console.error('[OTP] Exception:', e)
       setError(extractErrorMessage(e))
     }
     setLoading(false)
@@ -206,6 +249,8 @@ export default function LoginScreen({ navigateTo, setProfile }) {
           console.error('Photo upload failed', e)
         }
       }
+
+      console.log('[ONBOARD] Upserting member row for:', registeredUser.id)
 
       const { error: updError } = await supabase
         .from('members')
@@ -234,7 +279,7 @@ export default function LoginScreen({ navigateTo, setProfile }) {
       setProfile(profile)
       navigateTo('dashboard', true)
     } catch (e) {
-      console.error('Onboarding exception:', e)
+      console.error('[ONBOARD] Exception:', e)
       setError(extractErrorMessage(e))
     }
     setLoading(false)
@@ -279,6 +324,21 @@ export default function LoginScreen({ navigateTo, setProfile }) {
     }
   }
 
+  // ─── RENDER: Connection warning banner ───
+  const ConnectionBanner = () => {
+    if (connectionStatus === 'checking') return null
+    if (connectionStatus === 'fail') return (
+      <div style={{ background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 12, padding: 12, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <WifiOff size={20} color="#991B1B" />
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 600, color: '#991B1B' }}>Cannot reach Supabase</p>
+          <p style={{ fontSize: 12, color: '#B91C1C' }}>Check .env file and browser console (F12)</p>
+        </div>
+      </div>
+    )
+    return null
+  }
+
   if (mode === 'login') {
     return (
       <div style={loginContainer}>
@@ -286,7 +346,10 @@ export default function LoginScreen({ navigateTo, setProfile }) {
           <Shield size={40} color={COLORS.gold} />
         </div>
         <h1 style={{ fontFamily: FONTS.display, fontSize: 28, color: COLORS.brown, marginBottom: 4 }}>NYISH</h1>
-        <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 32 }}>Your community savings group</p>
+        <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 24 }}>Your community savings group</p>
+
+        <ConnectionBanner />
+
         <form onSubmit={handleLogin} style={{ width: '100%', maxWidth: 320 }}>
           <div style={inputGroup}>
             <Mail size={18} color={COLORS.textMuted} />
@@ -299,7 +362,12 @@ export default function LoginScreen({ navigateTo, setProfile }) {
               {showPassword ? <EyeOff size={18} color={COLORS.textMuted} /> : <Eye size={18} color={COLORS.textMuted} />}
             </button>
           </div>
-          {error && <p style={{ color: COLORS.red, fontSize: 13, marginBottom: 12, wordBreak: 'break-word' }}>{error}</p>}
+          {error && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
+              <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
+              <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
+            </div>
+          )}
           <button type="submit" disabled={loading} style={primaryBtn}>{loading ? 'Signing in...' : 'Sign In'}</button>
         </form>
         <button onClick={() => { setMode('register'); setError('') }} style={linkBtn}>
@@ -312,7 +380,10 @@ export default function LoginScreen({ navigateTo, setProfile }) {
   if (mode === 'register') {
     return (
       <div style={loginContainer}>
-        <h2 style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.brown, marginBottom: 24 }}>Join NYISH</h2>
+        <h2 style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.brown, marginBottom: 20 }}>Join NYISH</h2>
+
+        <ConnectionBanner />
+
         <form onSubmit={handleRegister} style={{ width: '100%', maxWidth: 320 }}>
           <div style={inputGroup}>
             <User size={18} color={COLORS.textMuted} />
@@ -336,9 +407,14 @@ export default function LoginScreen({ navigateTo, setProfile }) {
           </div>
           <div style={inputGroup}>
             <Lock size={18} color={COLORS.textMuted} />
-            <input type="password" placeholder="Create password" required value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
+            <input type="password" placeholder="Create password (min 6 chars)" required value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
           </div>
-          {error && <p style={{ color: COLORS.red, fontSize: 13, marginBottom: 12, wordBreak: 'break-word' }}>{error}</p>}
+          {error && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
+              <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
+              <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
+            </div>
+          )}
           <button type="submit" disabled={loading} style={primaryBtn}>{loading ? 'Registering...' : 'Create Account'}</button>
         </form>
         <button onClick={() => setMode('login')} style={linkBtn}>Already have an account? Sign in</button>
@@ -350,8 +426,11 @@ export default function LoginScreen({ navigateTo, setProfile }) {
     return (
       <div style={loginContainer}>
         <h2 style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.brown, marginBottom: 8 }}>Verify Email</h2>
-        <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 24, textAlign: 'center' }}>
-          Enter the 6-digit code sent to {email}
+        <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 8, textAlign: 'center' }}>
+          Enter the 6-digit code sent to<br /><strong>{email}</strong>
+        </p>
+        <p style={{ color: COLORS.textMuted, fontSize: 12, marginBottom: 20, textAlign: 'center' }}>
+          If you don't see the email, check Supabase Auth settings<br />or your spam folder.
         </p>
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
           {otp.map((d, i) => (
@@ -359,7 +438,12 @@ export default function LoginScreen({ navigateTo, setProfile }) {
               style={{ width: 44, height: 52, textAlign: 'center', fontSize: 20, fontWeight: 700, border: `2px solid ${d ? COLORS.gold : COLORS.border}`, borderRadius: 10, background: '#fff', color: COLORS.brown, outline: 'none' }} />
           ))}
         </div>
-        {error && <p style={{ color: COLORS.red, fontSize: 13, marginBottom: 12, wordBreak: 'break-word' }}>{error}</p>}
+        {error && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
+            <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
+            <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
+          </div>
+        )}
         <button onClick={handleOtpSubmit} disabled={loading || otp.join('').length !== 6} style={primaryBtn}>{loading ? 'Verifying...' : 'Verify'}</button>
         <button onClick={() => setMode('register')} style={linkBtn}>Back to registration</button>
       </div>
@@ -389,7 +473,12 @@ export default function LoginScreen({ navigateTo, setProfile }) {
             <Phone size={18} color={COLORS.textMuted} />
             <input placeholder="Next of Kin phone" value={reg.next_of_kin_phone || ''} onChange={e => setReg(r => ({ ...r, next_of_kin_phone: e.target.value }))} style={inputStyle} />
           </div>
-          {error && <p style={{ color: COLORS.red, fontSize: 13, marginBottom: 12, wordBreak: 'break-word' }}>{error}</p>}
+          {error && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
+              <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
+              <p style={{ color: '#991B1B', fontSize: 13, wordBreak: 'break-word', lineHeight: 1.4 }}>{error}</p>
+            </div>
+          )}
           <button type="submit" disabled={loading} style={primaryBtn}>{loading ? 'Saving...' : 'Complete Registration'}</button>
         </form>
       </div>
@@ -414,9 +503,4 @@ const inputStyle = {
   flex: 1, border: 'none', outline: 'none', fontSize: 15, color: COLORS.brown, background: 'transparent'
 }
 const primaryBtn = {
-  width: '100%', padding: '14px', borderRadius: 12, border: 'none',
-  background: COLORS.brown, color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', marginTop: 8
-}
-const linkBtn = {
-  background: 'none', border: 'none', color: COLORS.textLight, fontSize: 14, marginTop: 20, cursor: 'pointer'
-}
+  width: '100%', padding: '14px', borderRadius: 12, border:
