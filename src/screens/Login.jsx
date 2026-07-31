@@ -86,21 +86,23 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
     }
 
     const isFirst = count === 0
-    const userId = crypto.randomUUID()
 
-    const { error: insertErr } = await supabase.from('members').insert({
-      id: userId,
-      name: reg.name,
-      phone: reg.phone,
-      id_number: reg.id_number,
-      kra_pin: reg.kra_pin,
-      email: email,
-      password: password,
-      role: isFirst ? 'chair' : 'member',
-      status: isFirst ? 'active' : 'pending',
-      onboarding_completed: false,
-      join_date: new Date().toISOString(),
-    })
+    const { data: inserted, error: insertErr } = await supabase
+      .from('members')
+      .insert({
+        name: reg.name,
+        phone: reg.phone,
+        id_number: reg.id_number,
+        kra_pin: reg.kra_pin,
+        email: email,
+        password: password,
+        role: isFirst ? 'chair' : 'member',
+        status: isFirst ? 'active' : 'pending',
+        onboarding_completed: false,
+        join_date: new Date().toISOString(),
+      })
+      .select()
+      .single()
 
     if (insertErr) {
       showError('Registration failed: ' + insertErr.message)
@@ -108,8 +110,7 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
       return
     }
 
-    const profile = await getMemberProfile(userId)
-    setRegisteredUser(profile)
+    setRegisteredUser(inserted)
     setMode('onboarding')
     setLoading(false)
   }
