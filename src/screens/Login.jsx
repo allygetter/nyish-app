@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 
 export default function LoginScreen({ navigateTo, setProfile, setUser }) {
-  const [mode, setMode] = useState('login') // login | register | onboarding
+  const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -22,13 +22,12 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
   const [photoPreview, setPhotoPreview] = useState(null)
   const fileRef = useRef()
 
-  // ─── HELPERS ───
   function showError(msg) {
     setError(msg)
     console.error('[NYISH]', msg)
   }
 
-  // ─── LOGIN ───
+  // ─── LOGIN: direct table lookup ───
   async function handleLogin(e) {
     e.preventDefault()
     setError('')
@@ -54,7 +53,7 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
     setLoading(false)
   }
 
-  // ─── REGISTER ───
+  // ─── REGISTER: direct insert, first = chair ───
   async function handleRegister(e) {
     e.preventDefault()
     setError('')
@@ -66,7 +65,20 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
       return
     }
 
-    // Check if this is the first member ever
+    // Check if email already exists
+    const { data: existing } = await supabase
+      .from('members')
+      .select('id')
+      .eq('email', email)
+      .single()
+
+    if (existing) {
+      showError('This email is already registered. Please sign in.')
+      setLoading(false)
+      return
+    }
+
+    // Check if first member
     const { count, error: countErr } = await supabase
       .from('members')
       .select('*', { count: 'exact', head: true })
@@ -91,6 +103,7 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
       role: isFirst ? 'chair' : 'member',
       status: isFirst ? 'active' : 'pending',
       onboarding_completed: false,
+      join_date: new Date().toISOString(),
     })
 
     if (insertErr) {
@@ -169,7 +182,6 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
     reader.readAsDataURL(file)
   }
 
-  // ─── RENDER: ERROR BOX ───
   const ErrorBox = () => error ? (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, padding: 10, background: '#FEE2E2', borderRadius: 10 }}>
       <AlertCircle size={16} color="#991B1B" style={{ marginTop: 2, flexShrink: 0 }} />
@@ -178,7 +190,7 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
   ) : null
 
   // ═══════════════════════════════════════════════════════
-  // LOGIN SCREEN
+  // LOGIN
   // ═══════════════════════════════════════════════════════
   if (mode === 'login') {
     return (
@@ -192,19 +204,11 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
         <form onSubmit={handleLogin} style={{ width: '100%', maxWidth: 320 }}>
           <div style={inputGroup}>
             <Mail size={18} color={COLORS.textMuted} />
-            <input
-              type="email" placeholder="Email address" required
-              value={email} onChange={e => setEmail(e.target.value)}
-              style={inputStyle}
-            />
+            <input type="email" placeholder="Email address" required value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} />
           </div>
           <div style={inputGroup}>
             <Lock size={18} color={COLORS.textMuted} />
-            <input
-              type={showPassword ? 'text' : 'password'} placeholder="Password" required
-              value={password} onChange={e => setPassword(e.target.value)}
-              style={inputStyle}
-            />
+            <input type={showPassword ? 'text' : 'password'} placeholder="Password" required value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
             <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
               {showPassword ? <EyeOff size={18} color={COLORS.textMuted} /> : <Eye size={18} color={COLORS.textMuted} />}
             </button>
@@ -223,7 +227,7 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
   }
 
   // ═══════════════════════════════════════════════════════
-  // REGISTER SCREEN
+  // REGISTER
   // ═══════════════════════════════════════════════════════
   if (mode === 'register') {
     return (
@@ -265,7 +269,7 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
   }
 
   // ═══════════════════════════════════════════════════════
-  // ONBOARDING SCREEN
+  // ONBOARDING
   // ═══════════════════════════════════════════════════════
   if (mode === 'onboarding') {
     const isChair = registeredUser?.role === 'chair'
