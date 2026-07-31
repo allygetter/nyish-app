@@ -21,18 +21,10 @@ import RotationScreen from './screens/Rotation.jsx'
 import MoreScreen from './screens/More.jsx'
 
 const SCREENS = {
-  login: LoginScreen,
-  dashboard: DashboardScreen,
-  savings: SavingsScreen,
-  loans: LoansScreen,
-  meetings: MeetingsScreen,
-  announcements: AnnouncementsScreen,
-  fines: FinesScreen,
-  members: MembersScreen,
-  profile: ProfileScreen,
-  constitution: ConstitutionScreen,
-  rotation: RotationScreen,
-  more: MoreScreen,
+  login: LoginScreen, dashboard: DashboardScreen, savings: SavingsScreen,
+  loans: LoansScreen, meetings: MeetingsScreen, announcements: AnnouncementsScreen,
+  fines: FinesScreen, members: MembersScreen, profile: ProfileScreen,
+  constitution: ConstitutionScreen, rotation: RotationScreen, more: MoreScreen,
 }
 
 const TAB_SCREENS = ['dashboard', 'savings', 'loans', 'meetings', 'more']
