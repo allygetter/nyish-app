@@ -27,7 +27,6 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
     console.error('[NYISH]', msg)
   }
 
-  // ─── LOGIN: direct table lookup ───
   async function handleLogin(e) {
     e.preventDefault()
     setError('')
@@ -53,7 +52,6 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
     setLoading(false)
   }
 
-  // ─── REGISTER: direct insert, first = chair ───
   async function handleRegister(e) {
     e.preventDefault()
     setError('')
@@ -65,7 +63,6 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
       return
     }
 
-    // Check if email already exists
     const { data: existing } = await supabase
       .from('members')
       .select('id')
@@ -78,7 +75,6 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
       return
     }
 
-    // Check if first member
     const { count, error: countErr } = await supabase
       .from('members')
       .select('*', { count: 'exact', head: true })
@@ -118,7 +114,6 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
     setLoading(false)
   }
 
-  // ─── ONBOARDING ───
   async function handleOnboardingSubmit(e) {
     e.preventDefault()
     setError('')
@@ -189,15 +184,10 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
     </div>
   ) : null
 
-  // ═══════════════════════════════════════════════════════
-  // LOGIN
-  // ═══════════════════════════════════════════════════════
   if (mode === 'login') {
     return (
       <div style={loginContainer}>
-        <div style={sealStyle}>
-          <Shield size={40} color={COLORS.gold} />
-        </div>
+        <div style={sealStyle}><Shield size={40} color={COLORS.gold} /></div>
         <h1 style={{ fontFamily: FONTS.display, fontSize: 28, color: COLORS.brown, marginBottom: 4 }}>NYISH</h1>
         <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 32 }}>Your community savings group</p>
 
@@ -214,11 +204,8 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
             </button>
           </div>
           <ErrorBox />
-          <button type="submit" disabled={loading} style={primaryBtn}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
+          <button type="submit" disabled={loading} style={primaryBtn}>{loading ? 'Signing in...' : 'Sign In'}</button>
         </form>
-
         <button onClick={() => { setMode('register'); setError('') }} style={linkBtn}>
           New member? <span style={{ color: COLORS.gold, fontWeight: 600 }}>Register</span>
         </button>
@@ -226,9 +213,6 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
     )
   }
 
-  // ═══════════════════════════════════════════════════════
-  // REGISTER
-  // ═══════════════════════════════════════════════════════
   if (mode === 'register') {
     return (
       <div style={loginContainer}>
@@ -259,18 +243,13 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
             <input type="password" placeholder="Create password (min 4 chars)" required value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
           </div>
           <ErrorBox />
-          <button type="submit" disabled={loading} style={primaryBtn}>
-            {loading ? 'Registering...' : 'Create Account'}
-          </button>
+          <button type="submit" disabled={loading} style={primaryBtn}>{loading ? 'Registering...' : 'Create Account'}</button>
         </form>
         <button onClick={() => setMode('login')} style={linkBtn}>Already have an account? Sign in</button>
       </div>
     )
   }
 
-  // ═══════════════════════════════════════════════════════
-  // ONBOARDING
-  // ═══════════════════════════════════════════════════════
   if (mode === 'onboarding') {
     const isChair = registeredUser?.role === 'chair'
     return (
@@ -279,27 +258,19 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
           {isChair ? 'Welcome, Chairperson!' : 'Complete Profile'}
         </h2>
         <p style={{ color: COLORS.textLight, fontSize: 14, marginBottom: 24, textAlign: 'center' }}>
-          {isChair
-            ? 'You are the first member — you have been assigned as Chairperson.'
-            : 'Your registration is pending Chairperson approval.'}
+          {isChair ? 'You are the first member — you have been assigned as Chairperson.' : 'Your registration is pending Chairperson approval.'}
         </p>
         <form onSubmit={handleOnboardingSubmit} style={{ width: '100%', maxWidth: 320 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20 }}>
             <div onClick={() => fileRef.current?.click()} style={{
               width: 100, height: 100, borderRadius: '50%', border: `2px dashed ${COLORS.border}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              overflow: 'hidden', cursor: 'pointer', background: COLORS.creamDark
+              display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', background: COLORS.creamDark
             }}>
-              {photoPreview ? (
-                <img src={photoPreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : (
-                <Camera size={28} color={COLORS.textMuted} />
-              )}
+              {photoPreview ? <img src={photoPreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Camera size={28} color={COLORS.textMuted} />}
             </div>
             <input ref={fileRef} type="file" accept="image/*" onChange={handlePhotoChange} style={{ display: 'none' }} />
             <span style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 8 }}>Tap to add photo (optional)</span>
           </div>
-
           <div style={inputGroup}>
             <User size={18} color={COLORS.textMuted} />
             <input placeholder="Next of Kin name" value={reg.next_of_kin || ''} onChange={e => setReg(r => ({ ...r, next_of_kin: e.target.value }))} style={inputStyle} />
@@ -308,7 +279,6 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
             <Phone size={18} color={COLORS.textMuted} />
             <input placeholder="Next of Kin phone" value={reg.next_of_kin_phone || ''} onChange={e => setReg(r => ({ ...r, next_of_kin_phone: e.target.value }))} style={inputStyle} />
           </div>
-
           <ErrorBox />
           <button type="submit" disabled={loading} style={primaryBtn}>
             {loading ? 'Saving...' : isChair ? 'Enter Dashboard' : 'Complete Registration'}
@@ -317,6 +287,8 @@ export default function LoginScreen({ navigateTo, setProfile, setUser }) {
       </div>
     )
   }
+
+  return null
 }
 
 const loginContainer = {
@@ -325,26 +297,20 @@ const loginContainer = {
   background: COLORS.cream
 }
 const sealStyle = {
-  width: 80, height: 80, borderRadius: '50%',
-  border: `3px solid ${COLORS.gold}`,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  marginBottom: 16, background: '#fff'
+  width: 80, height: 80, borderRadius: '50%', border: `3px solid ${COLORS.gold}`,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, background: '#fff'
 }
 const inputGroup = {
-  display: 'flex', alignItems: 'center', gap: 10,
-  background: '#fff', border: `1px solid ${COLORS.border}`,
+  display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${COLORS.border}`,
   borderRadius: 12, padding: '10px 14px', marginBottom: 12
 }
 const inputStyle = {
-  flex: 1, border: 'none', outline: 'none', fontSize: 15,
-  color: COLORS.brown, background: 'transparent'
+  flex: 1, border: 'none', outline: 'none', fontSize: 15, color: COLORS.brown, background: 'transparent'
 }
 const primaryBtn = {
   width: '100%', padding: '14px', borderRadius: 12, border: 'none',
-  background: COLORS.brown, color: '#fff', fontSize: 15, fontWeight: 600,
-  cursor: 'pointer', marginTop: 8
+  background: COLORS.brown, color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', marginTop: 8
 }
 const linkBtn = {
-  background: 'none', border: 'none', color: COLORS.textLight,
-  fontSize: 14, marginTop: 20, cursor: 'pointer'
+  background: 'none', border: 'none', color: COLORS.textLight, fontSize: 14, marginTop: 20, cursor: 'pointer'
 }
