@@ -4,7 +4,7 @@ import { COLORS, FONTS, formatDate, getAvatarColor, getInitials, generateQRData 
 import { QrCode, Award, Camera, Download, LogOut, X } from 'lucide-react'
 import QRCode from 'qrcode'
 
-export default function ProfileScreen({ user, profile, setProfile, navigateTo }) {
+export default function ProfileScreen({ user, profile, setProfile, navigateTo, handleLogout }) {
   const [showQR, setShowQR] = useState(false)
   const [showCert, setShowCert] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState('')
@@ -19,7 +19,7 @@ export default function ProfileScreen({ user, profile, setProfile, navigateTo })
     }
   }, [profile])
 
-  async function generateQRCode(p) {
+  async function generateQR(p) {
     if (!p) return
     const data = generateQRData(p)
     try {
@@ -52,10 +52,6 @@ export default function ProfileScreen({ user, profile, setProfile, navigateTo })
       const p = await getMemberProfile(user.id)
       setProfile(p)
     } catch (e) { alert('Upload failed') }
-  }
-
-  async function handleLogout() {
-    await supabase.auth.signOut()
   }
 
   if (!profile) return null
