@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect } from 'react'
 import { supabase, getMemberProfile } from './lib/supabase.js'
 import { setupOnlineListener, flushQueue, isOnline } from './lib/offlineQueue.js'
 import { COLORS, FONTS } from './lib/styles.js'
@@ -114,7 +114,7 @@ export default function App() {
     })
   }
 
-  async function handleLogout() {
+  function handleLogout() {
     localStorage.removeItem('nyish_user_id')
     setUser(null)
     setProfile(null)
