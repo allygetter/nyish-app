@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-cream text-ink font-body antialiased;
+}
+
+h1, h2, h3, h4 {
+  @apply font-display text-forest-dark;
+}
+
+:focus-visible {
+  outline: 2px solid #C9962B;
+  outline-offset: 2px;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-5 py-3 font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
+}
+.btn-primary {
+  @apply bg-forest text-white hover:bg-forest-dark;
+}
+.btn-gold {
+  @apply bg-gold text-forest-dark hover:bg-gold-dark;
+}
+.btn-outline {
+  @apply border border-forest text-forest hover:bg-forest hover:text-white;
+}
+.btn-ghost {
+  @apply text-forest hover:bg-forest/5;
+}
+.btn-danger {
+  @apply bg-clay text-white hover:opacity-90;
+}
+
+.card {
+  @apply bg-white border border-line rounded-lg p-5;
+}
+
+.input {
+  @apply w-full rounded-md border border-line bg-white px-3 py-2.5 text-ink placeholder:text-ink/40 focus:border-forest focus:ring-1 focus:ring-forest outline-none;
+}
+
+.label {
+  @apply block text-sm font-medium text-ink/70 mb-1;
+}
+
+.badge {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+}
