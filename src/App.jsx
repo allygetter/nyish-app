@@ -873,6 +873,19 @@ export default function NyishApp() {
     }
   }, [members]); // eslint-disable-line
 
+  // Keep all hooks unconditional. This prevents the authenticated
+  // dashboard from changing the number/order of hooks after login.
+  const official = isOfficial(me);
+  const isChair = me?.role === "chair";
+  const isTreasurer = me?.role === "treasurer";
+  const isSecretary = me?.role === "secretary";
+
+  const mySavingsTotal = useMemo(() => savings.filter((s) => s.memberId === me?.id).reduce((a, b) => a + Number(b.amount), 0), [savings, me?.id]);
+  const groupSavingsTotal = useMemo(() => savings.reduce((a, b) => a + Number(b.amount), 0), [savings]);
+  const totalLoansOut = useMemo(() => loans.filter((l) => ["approved", "active"].includes(l.status)).reduce((a, b) => a + Number(b.balance), 0), [loans]);
+  const totalFinesCollected = useMemo(() => fines.filter((f) => f.status === "paid").reduce((a, b) => a + Number(b.amount), 0), [fines]);
+  const activeMembers = useMemo(() => members.filter((m) => m.status === "active"), [members]);
+
   if (loading) {
     return (
       <AuthShell>
@@ -911,17 +924,6 @@ export default function NyishApp() {
     );
   }
 
-  const official = isOfficial(me);
-  const isChair = me.role === "chair";
-  const isTreasurer = me.role === "treasurer";
-  const isSecretary = me.role === "secretary";
-
-  // Memoize expensive aggregates
-  const mySavingsTotal = useMemo(() => savings.filter((s) => s.memberId === me.id).reduce((a, b) => a + Number(b.amount), 0), [savings, me.id]);
-  const groupSavingsTotal = useMemo(() => savings.reduce((a, b) => a + Number(b.amount), 0), [savings]);
-  const totalLoansOut = useMemo(() => loans.filter((l) => ["approved", "active"].includes(l.status)).reduce((a, b) => a + Number(b.balance), 0), [loans]);
-  const totalFinesCollected = useMemo(() => fines.filter((f) => f.status === "paid").reduce((a, b) => a + Number(b.amount), 0), [fines]);
-  const activeMembers = useMemo(() => members.filter((m) => m.status === "active"), [members]);
 
   const persist = {
     // Members
