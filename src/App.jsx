@@ -1274,8 +1274,10 @@ function SavingsPage({ ctx }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    // Only the Chairperson and Treasurer may manually record contributions.
+    if (!canManageFinance) return notify("Only the Chairperson or Treasurer can record savings contributions.");
     if (!amount || Number(amount) <= 0) return notify("Enter a valid amount.");
-    const entry = { id: uid(), memberId: canManageFinance ? memberId : me.id, amount: Number(amount), date: todayISO(), note: note.trim(), recordedBy: me.id };
+    const entry = { id: uid(), memberId, amount: Number(amount), date: todayISO(), note: note.trim(), recordedBy: me.id };
     await persist.appendSaving(entry);
     notify("Contribution recorded.");
     setAmount(""); setNote(""); setShowForm(false);
@@ -1362,12 +1364,13 @@ function SavingsPage({ ctx }) {
           </Card>
         )}
 
-        <Btn variant="ghost" icon={<Plus size={16} />} onClick={() => setShowForm((s) => !s)}>
-          {canManageFinance ? "Record a contribution manually" : "Record a cash contribution"}
-        </Btn>
+        {canManageFinance && (
+          <Btn variant="ghost" icon={<Plus size={16} />} onClick={() => setShowForm((s) => !s)}>
+            Record a contribution manually
+          </Btn>
+        )}
 
-
-        {showForm && (
+        {canManageFinance && showForm && (
           <Card style={{ marginTop: 14 }}>
             <form onSubmit={submit}>
               {canManageFinance && (
